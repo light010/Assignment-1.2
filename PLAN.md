@@ -483,7 +483,110 @@ most capable current models are Opus 4.8 / Sonnet 4.6 / Haiku 4.5.)*
 
 ---
 
-## 13. Bottom line
+## 13. Karpathy-style LLM-first content structure
+
+The graph (§2–§5) governs *identity and links between* pages. This section governs the
+*shape of a page itself* so the corpus is optimal for LLM consumption — the same ethos as
+the `llms.txt` convention and nanoGPT's single-file readability: **flat, plain Markdown,
+answer-first, greppable, and concatenatable into one paste-able bundle.** It fleshes out
+`shared/templates/page.md` and `runbook.md`.
+
+### 13.1 Core principle — a page is one context-window unit
+
+Every page is **atomic** (one concept), **self-contained** (correct with zero prior
+context), and **front-loaded** (the answer in the first ~5 lines, depth after). An LLM that
+retrieves a single page must be able to act correctly without fetching three others. This is
+the content-side reason for the flat, no-deep-nesting rule in §2 — directory depth is
+navigation chrome the model does not need. If a page needs an "also covers…" aside, that is
+a signal to `split` (§3), not to nest.
+
+### 13.2 The fixed 7-section page skeleton (every `kind: page`)
+
+A predictable section order is the single biggest retrieval lever — the model always knows
+where the answer lives, and truncation degrades gracefully because importance descends
+(inverted pyramid). Sections are emitted in this exact order:
+
+```markdown
+# <title>
+
+> **TL;DR.** One paragraph: what it is, when to use it, the one gotcha.
+> A reader who stops here is shallow but still correct.
+
+## When to use this        # decision-first: use when / don't use when / reach for X instead
+## Key concepts            # the 3–6 nouns you must know, DEFINED INLINE (not by [[link]])
+## How it works            # mechanism, concrete, with a minimal copy-pasteable example
+## Common operations       # task → exact commands / recipes
+## Pitfalls & gotchas      # the warnings this page exists to deliver
+## Related pages           # compiler-owned <!--related--> region (§2.1)
+## Sources                 # compiler-rendered from source_refs (§2.3)
+```
+
+Two rules that make this LLM-first rather than just a template:
+- **Inverted pyramid:** TL;DR → decision → concepts → mechanism → edge cases. Descending
+  importance so a truncated read is still useful.
+- **Definitions inline, links for *more*:** never force the model to chase `[[term]]` to
+  learn what a word means. A link is always for *additional* depth, never a prerequisite.
+
+### 13.3 The runbook skeleton (every `kind: runbook`)
+
+Operational pages use a stricter order, and the **Steps block is the human-authored,
+`verified_by: human`, LLM-never region** from §4:
+
+```markdown
+## Symptoms          # how you know you are in this situation
+## Preconditions     # access, tools, blast radius
+## Steps             # <!-- human: numbered, verified, NEVER regenerated -->
+   1. exact command — expected output — if this fails → …
+## Verification      # how you know it worked
+## Rollback          # how to undo
+```
+
+### 13.4 LLM-facing bundles — generated, not authored
+
+Two new **generated** artifact families (pure functions of `content/`, deterministic,
+artifact-header-stamped, diff-gated exactly like the rest of `generated/`):
+
+```
+generated/llms/
+  llms.txt                 # root index: every wiki + page, one-line TL;DR + link (llms.txt convention)
+  <wiki>.llms.txt          # per-wiki curated index an LLM reads first to decide what to fetch
+  <wiki>-full.md           # ALL pages in a wiki, concatenated in dependency order
+  all-full.md              # the entire corpus as one paste-able file
+```
+
+- **`llms.txt`** is a flat, link-rich Markdown map generated from `index.json` (title, `id`,
+  TL;DR line, `scope`). It is what an agent reads first.
+- **`*-full.md`** is the "paste the whole thing into context" bundle: every page concatenated
+  with stable `<!-- page:aws:step-functions -->` delimiters, ordered by a **topological sort
+  over the intra-wiki edges of `graph.json`** so prerequisites precede dependents. This reuses
+  the graph already built in V0/V1 — no new analysis.
+- Both regenerate from scratch and are covered by the §10 no-dirty-graph gate.
+
+### 13.5 Naming, anchors, chunking
+
+- **Stable greppable anchors:** the fixed headings map to fixed slugs (`#pitfalls-gotchas`),
+  so a citation like `aws:step-functions#pitfalls` survives body edits.
+- **Chunk-sized sections:** each `##` is self-contained and paragraph-scale, so it embeds /
+  retrieves as one clean unit; no section assumes the reader saw the previous one.
+- **One concept per file** (atomicity) — enforced socially by the skeleton and structurally
+  by the `split` lifecycle op.
+
+### 13.6 Enforcement & sequencing
+
+| Element | Where it lands |
+|---|---|
+| `page.md` / `runbook.md` skeletons | `shared/templates/` (V0) |
+| Section-order lint (required headings present, in order; runbook Steps block is human-only) | new `check` rule (V0/V1) |
+| `generated/llms/` bundles (`llms.txt`, `*-full.md`, topological order) | new generated artifacts, diff-gated (V1) |
+| Citations / Sources block from `source_refs` | already V0 (§2.3) |
+
+The skeleton lint is cheap and LLM-free, so it ships with the V0/V1 deterministic core; the
+bundles depend only on `graph.json`, so they ship in V1. No part of this section needs an
+LLM to produce or verify.
+
+---
+
+## 14. Bottom line
 
 Keep the clustered knowledge-graph instinct — it maps correctly to the topology. But before
 any AI, entities, or automation, lock down the four foundations: **registry-owned identity,
